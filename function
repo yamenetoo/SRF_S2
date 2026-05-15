@@ -1,0 +1,103 @@
+import pandas as pd
+import numpy as np
+from scipy.interpolate import interp1d
+
+def get_spectral_response_function(excel_file_path, satellite='S2A', band='B01'):
+    """
+    Returns an interpolation function for a specific satellite and band.
+    
+    Parameters:
+    -----------
+    excel_file_path : str
+        Path to the Excel file
+    satellite : str
+        Satellite name: 'S2A', 'S2B', or 'S2C'
+    band : str
+        Band name: 'B01', 'B02', ..., 'B12', 'B8A'
+    
+    Returns:
+    --------
+    function
+        Interpolation function: f(wavelength) -> spectral_response
+        Returns 0 for wavelengths outside the valid range
+    
+    Example:
+    --------
+    >>> srf_func = get_spectral_response_function('file.xlsx', 'S2A', 'B04')
+    >>> response = srf_func(665.0)  # Get response at 665 nm
+    >>> print(response)
+    0.81016890
+    """
+    
+    # Map band names to column names
+    band_to_col = {
+        'B01': 'SR_AV_B1',
+        'B02': 'SR_AV_B2',
+        'B03': 'SR_AV_B3',
+        'B04': 'SR_AV_B4',
+        'B05': 'SR_AV_B5',
+        'B06': 'SR_AV_B6',
+        'B07': 'SR_AV_B7',
+        'B08': 'SR_AV_B8',
+        'B8A': 'SR_AV_B8A',
+        'B09': 'SR_AV_B9',
+        'B10': 'SR_AV_B10',
+        'B11': 'SR_AV_B11',
+        'B12': 'SR_AV_B12'
+    }
+    
+    if band not in band_to_col:
+        raise ValueError(f"Invalid band: {band}. Must be one of {list(band_to_col.keys())}")
+    
+    if satellite not in ['S2A', 'S2B', 'S2C']:
+        raise ValueError(f"Invalid satellite: {satellite}. Must be 'S2A', 'S2B', or 'S2C'")
+    
+    # Read the appropriate sheet
+    sheet_name = f'Spectral Responses ({satellite})'
+    df = pd.read_excel(excel_file_path, sheet_name=sheet_name)
+    
+    # Get column name for this band
+    col_name = f'{satellite}_{band_to_col[band]}'
+    
+    if col_name not in df.columns:
+        raise ValueError(f"Column {col_name} not found in sheet {sheet_name}")
+    
+    # Extract wavelength and spectral response data
+    wavelengths = df['SR_WL'].values
+    spectral_response = df[col_name].values
+    
+    # Find valid (non-zero) range for better interpolation
+    valid_mask = spectral_response > 0
+    if not np.any(valid_mask):
+        # If all zeros, return a function that always returns 0
+        return lambda wl: 0.0
+    
+    # Create interpolation function with bounds checking
+    # Use linear interpolation, extrapolate with 0 outside range
+    interp_func = interp1d(
+        wavelengths,
+        spectral_response,
+        kind='linear',
+        bounds_error=False,
+        fill_value=0.0
+    )
+    
+    # Return a wrapper function
+    def spectral_response_function(wavelength):
+        """
+        Calculate spectral response at given wavelength(s).
+        
+        Parameters:
+        -----------
+        wavelength : float or array-like
+            Wavelength in nanometers
+        
+        Returns:
+        --------
+        float or ndarray
+            Spectral response value(s) between 0 and 1
+        """
+        return float(interp_func(wavelength)) if np.isscalar(wavelength) else interp_func(wavelength)
+    
+    return spectral_response_function
+
